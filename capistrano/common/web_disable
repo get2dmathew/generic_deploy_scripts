@@ -1,0 +1,26 @@
+namespace :web do
+     [ :disable, :enable ].each do |default_task|
+       desc "[internal] disabled"
+       task default_task do
+         # disabled
+       end
+     end
+   end
+
+
+
+namespace :pending do
+  [ :default, :diff ].each do |default_task|
+    desc "[internal] disabled"
+    task default_task do
+      # disabled
+    end
+  end
+end
+
+
+desc "Set flag true/false if we need web (static files ) deployment"
+task :configure_static_deploy_flag do
+   set :normalize_asset_timestamps , false
+end
+

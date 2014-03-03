@@ -1,0 +1,42 @@
+namespace :service do
+  desc "start the given application"
+  task :start do
+    puts "Starting service"
+    puts "#{service_ctrl} start"
+    run "#{service_ctrl} start"
+  end
+
+  desc "Status check for  the given service"
+  task :status do
+    puts "Checking Status of the service"
+    puts "#{service_ctrl} status"
+    run "#{service_ctrl} status"
+  end
+ 
+  desc "stop the given service"
+  task :stop do
+    puts "Stopping service"
+    puts "#{service_ctrl} stop"
+    run "#{service_ctrl} stop"
+    sleep 5
+  end
+
+  desc "restart the given service"
+  task :real_restart do
+    puts "Restarting service"
+    puts "#{service_ctrl} restart"
+    run "#{service_ctrl} restart"
+  end
+
+  desc "stop and start the given service"
+  task :restart do
+    begin
+      stop
+    rescue => e
+      logger.info "Stop command ignored since service is already down or some error occurred !!! "
+    end
+    start
+  end
+
+
+end

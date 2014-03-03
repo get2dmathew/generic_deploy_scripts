@@ -1,0 +1,41 @@
+#!/usr/bin/ruby
+# This script can be used for deploying services that uses artifacts like war or jar files, which
+# is pretty much any jetty or standalone apps
+#
+# The following variables are passed from Jenkins via the command line
+#   (roles (service_role), application ,env ,data_bag)), (version | artifact_url | (sprint_name && build_number)), instance (optional),
+# The following variables are fetched from Chef data_bag
+#   (artifact_path | artifact_url_prefix), artifact_type, keep_releases, init_script, artifact_name
+
+
+
+Dir.chdir(File.dirname(__FILE__))
+load 'common_tasks'
+
+configure_static_deploy_flag
+set_core_variables
+set_service_ctrl
+set_role
+
+set :scm, :none
+set :deploy_via, :copy
+set :repository do
+   fetch(:deploy_from)
+end
+
+set :deploy_from do
+   dir = "/tmp/prep_#{release_name}"   # release_name is a built-in var from Cap
+   system("mkdir -p #{dir}")
+   dir
+end
+
+# fetch the  artifact into the deploy_from folder
+before 'deploy:update' do
+   set_artifact_location unless exists? :artifact_location and !artifact_location.empty?
+   fetch_artifact(artifact_location, deploy_from)
+   set_deploy_to
+   set_symlink
+end
+
+after 'deploy:symlink', :create_symlink, :create_version_file, :check_deployed_file, :update_node_codeversion
+

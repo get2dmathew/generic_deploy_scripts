@@ -1,0 +1,38 @@
+namespace :jetty do
+
+  desc "start jetty for the given application"
+  task :start do
+    puts "Starting Jetty"
+    puts "#{jetty_ctrl} start"
+    run "#{jetty_ctrl} start"
+  end
+ 
+  desc "start jetty for the given application"
+  task :start do
+    puts "Starting Jetty"
+    puts "#{jetty_ctrl} start"
+    run "#{jetty_ctrl} start"
+  end
+ 
+  desc "stop jetty for the given application"
+  task :stop do
+    puts "Stopping Jetty"
+    puts "#{jetty_ctrl} stop"
+    run "#{jetty_ctrl} stop"
+  end
+
+  desc "stop and start jetty for the given application"
+  task :restart do
+    puts "Restarting Jetty"
+    puts "#{jetty_ctrl} restart"
+    run "#{jetty_ctrl} restart"
+  end
+
+  desc "tail -n -f :deploy_to/logs/*.log"
+  task :tail do
+    stream "tail -n 0 -f #{deploy_to}/logs/log4j.log"
+  end 
+
+end
+
+

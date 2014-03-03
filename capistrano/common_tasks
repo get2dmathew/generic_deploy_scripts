@@ -1,0 +1,212 @@
+#!/usr/bin/ruby
+Dir.chdir(File.dirname(__FILE__))
+load 'deploy'
+load 'common/service_tasks'
+load 'common/web_disable'
+load 'common/cap_helper.rb'
+require 'capistrano/chef'
+require 'capistrano/chefutils'
+# This script contains common tasks that can be called to run jobs such as deploy or controlling services
+# The following variables are passed from Jenkins via the command line
+#   (roles (service_role), application ,env ,data_bag)), (version | artifact_url | (sprint_name && build_number)), instance (optional),
+# The following variables are fetched from Chef data_bag
+#   (artifact_path | artifact_url_prefix), artifact_type, keep_releases, init_script, artifact_name
+
+desc " Initialize deployment. Set up the basic variables needed "
+task :set_core_variables do
+   #cap_helper = CapHelper.new
+
+   set :use_sudo, false
+
+   set :application, "#{application}"
+   begin
+	set_from_data_bag :"#{data_bag}"
+   rescue 
+        logger.info "Error reading data_bag . Defaults will be set"
+   end
+   #set_artifactory_from_data_bag :"passwords"
+
+   set :artifact_name, application unless exists? :artifact_name
+   
+
+   if deploy_to.include? "/u/apps"
+	 set :deploy_to ,"/opt/app/#{application}/deploy" 
+   end
+   set :symlink_path,  deploy_to unless exists? :symlink_path
+   set :symlink_appname,  application unless exists? :symlink_appname
+   set :service_ctrl_prefix , "service" unless exists? :service_ctrl_prefix
+   set :init_script ,  "ng-#{application}" unless exists? :init_script
+   set :artifact_type , "war"  unless exists? :artifact_type
+   set :keep_releases , "5"  unless exists? :keep_releases
+   #set :artifact_url_prefix, deploy_var['artifact_url_prefix']
+   #set :keep_releases, deploy_var['keep_releases']
+
+
+end
+
+desc "Figure out what the final symlink will be"
+task :set_symlink do
+   # TODO catch exception case and default to base value
+   #set :symlink_appname,  application
+   set :symlink_path,  deploy_to
+end
+
+
+
+desc "Figure out what directory to deploy to"
+task :set_deploy_to do
+   logger.info "This is deploy_to #{deploy_to}"
+   deploy_dir = "#{deploy_to}"
+   set :deploy_to, deploy_dir
+   logger.info "Set deploy_to to #{deploy_dir}"
+end
+
+
+desc "Figure out the init script"
+task :set_init_script do
+   local_init_script = deploy_var['init_script'] || "#{application}-i#{instance}"
+   local_init_script.gsub!("__INSTANCE__", instance.to_s)
+   set :init_script, local_init_script
+end
+
+desc "Initialize the artifact_location variable"
+task :set_artifact_location do
+   # Figure out artifact related stuff
+   logger.info "Inside *************** set_artifact_location #{artifact_path}"
+   if exists?(:sprint_name) && !sprint_name.empty?
+      project_build_dir = "/var/lib/jenkins/jobs/#{sprint_name}/builds"
+      artifact_path_fullpath = "#{project_build_dir}/#{build_number}/#{artifact_path}"
+      logger.info "artifact_path --> #{artifact_path_fullpath}"
+      # For qa build, sprint_name is the version
+      set :version, "#{sprint_name}"
+      possible_artifact = Dir["#{artifact_path_fullpath}"]
+      if possible_artifact.size != 1
+         logger.info "There should be exactly one artifact. Instead this is what we have: #{possible_artifact.inspect}. artifact_path = #{artifact_path_fullpath}"
+         Process.abort
+      end
+      set :artifact_location, possible_artifact[0]
+      # try to figure out artifact location, could either be from Nexus or from Hudson local dir
+      # artifact in Nexus will have higher precedent
+   elsif artifact_url_prefix
+      artifact_filename = "#{artifact_name}-#{version}.#{artifact_type}"
+      set :artifact_location, File.join(artifact_url_prefix, version.to_s, artifact_filename)
+   end
+   logger.info "This is the artifact_location ------------------------------------------>#{artifact_location}"
+   #if !is_artifact_there?(artifact_location)
+   #   logger.important "Can't find the artifact at #{artifact_location}. "
+   #   logger.important "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+   #   logger.important "!!!!!!!!!!!!!!!!!!DEPLOY FAILED !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+   #   logger.important "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+   #   Process.abort
+   #end
+end
+
+
+
+
+desc "Set up the list of remote hosts to deploy to"
+task :set_role do
+   if exists?(:deploy_to_nodes) && !deploy_to_nodes.empty?
+      hosts = deploy_to_nodes.split(",")
+      hosts.each do |host|
+         role :app, host
+      end
+   elsif exists?(:service_role) && exists?(:env)
+      search="role:#{service_role} AND chef_environment:#{env}"
+      chef_role :app, "#{search}"
+      logger.info "#{search.inspect}"
+   else
+      logger.important "Don't know the nodes list"
+      Process.abort
+   end
+end
+
+
+desc "Check deployed file"
+task :check_deployed_file do
+   run "ls -ltr #{deploy_to}"
+   run "ls -ltr #{deploy_to}/current/*.#{artifact_type}"
+end
+
+desc "Create our own symlink to where the file was deployed"
+task :create_symlink do
+   cmd = "ln -f -s `ls #{deploy_to}/current/*.#{artifact_type}` #{symlink_path}/#{symlink_appname}.#{artifact_type}"
+   logger.info cmd
+   run cmd
+end
+
+desc "Create file to keep track of what version has been deployed"
+task :create_version_file do
+   msg = "Version Deployed :"
+   if exists? :version
+      msg += ". version #{version}"
+   end
+   if exists? :build_number
+      msg += ", build no - #{build_number}"
+   end
+   if exists? :build_user
+      msg += ", by user #{build_user}"
+   end
+   if exists? :artifact_location
+	 msg += "artifact_location #{artifact_location}"
+   end
+	
+   run "cd #{deploy_to}/current; touch version_deployed.txt ; echo '#{msg}' > version_deployed.txt"
+end
+
+desc "Update Nodegroup code_version graffiti value with new code deployed"
+task :update_node_codeversion do
+   if exists?  :artifact_location
+	version=  File.basename(artifact_location)
+   end
+   if exists? :branch
+	version= branch
+   end
+    # If deploy_to_nodes is specified then update the code version only for these nodes else update for all nodes .
+    if exists?(:deploy_to_nodes) && !deploy_to_nodes.empty?
+      hosts = deploy_to_nodes.split(",")
+         logger.info "update_node_codeversion_nodes "
+      ChefHelper.new.update_node_codeversion_nodes(hosts,version)
+    else
+      logger.info "update_node_codeversion_recipes "
+      ChefHelper.new.update_node_codeversion_recipes(service_role,env,version)
+    end
+end
+
+
+task :set_repo do
+  set :repository, "#{repo_url}"
+  puts "repo_url is *************** #{repo_url} "
+end
+
+desc "Set the command to control the service"
+task :set_service_ctrl do
+   set :service_ctrl, "sudo  #{service_ctrl_prefix} #{init_script}"
+end
+
+#start service
+namespace :deploy do
+   task :restart do
+      service.real_restart
+   end
+end
+
+#
+# Disable all the default tasks that
+# either don't apply, or I haven't made work.
+#
+namespace :deploy do
+   [ :upload, :cold, :migrate, :migrations ].each do |default_task|
+      desc "[internal] disabled"
+      task default_task do
+         # disabled
+      end
+   end
+
+   after :deploy, 'deploy:cleanup'
+
+   after 'deploy:cleanup' do
+      logger.info "Deploy Finished"
+   end
+end
+

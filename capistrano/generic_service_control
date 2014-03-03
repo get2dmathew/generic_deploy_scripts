@@ -1,0 +1,22 @@
+#!/usr/bin/ruby
+# Do Service control commands from Jenkins eg : restart/start/stop etc
+
+
+
+Dir.chdir(File.dirname(__FILE__))
+load 'common_tasks'
+
+before :invoke do
+  set_core_variables
+  set_role
+end
+
+# Just run the command 
+# TODO update the script logic with failover feature .
+task :invoke do
+    #set_init_script
+    set_service_ctrl
+    puts "#{action}"
+    service.send(action)
+
+end
